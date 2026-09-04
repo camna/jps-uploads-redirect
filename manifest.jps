@@ -1,0 +1,198 @@
+type: update
+version: 1.0.0
+id: uploads-redirect
+name: Uploads Redirect
+logo: images/logo.svg
+
+description:
+  short: Redirect missing /wp-content/uploads/ files to your live/production domain.
+  text: |
+    For staging/dev WordPress sites that do not have a full media library locally.
+
+    On install (or Configure), the add-on:
+    1. Asks for your live (production) domain
+    2. Inserts Nginx `location` blocks for `/wp-content/uploads/` into `default.conf`
+       (as the first location block, after root / index / headers / auth)
+    3. Serves files that exist locally; otherwise 301-redirects to production
+    4. Reloads Nginx
+
+    Use **Configure** to change the live domain. Use **Disable** (or Uninstall) to remove the redirect.
+
+categories:
+  - apps/dev-and-admin-tools
+
+targetEditions: any
+
+targetNodes:
+  nodeType:
+    - nginxphp
+    - nginxphp-dockerized
+    - lemp
+    - nginx
+    - nginx-dockerized
+    - nginx-ruby
+    - nginxruby
+
+settings:
+  fields:
+    - name: liveDomain
+      caption: Live / production domain
+      type: string
+      required: true
+      default: www.example.com
+      tooltip: Hostname only (e.g. www.nigelbeauty.com). https:// is added automatically. Missing upload files redirect here with a 301.
+
+buttons:
+  - caption: Configure
+    settings: main
+    action: enableRedirect
+    loadingText: Updating uploads redirect...
+    successText: Uploads redirect has been updated.
+  - caption: Disable
+    action: disableRedirect
+    confirmText: Remove the /wp-content/uploads/ redirect to production from this site?
+    loadingText: Disabling uploads redirect...
+    successText: Uploads redirect has been disabled.
+
+onInstall: enableRedirect
+onUninstall: disableRedirect
+
+actions:
+  enableRedirect:
+    - cmd[${targetNodes.nodeGroup}]: |-
+        set -e
+        RAW='${settings.liveDomain}'
+
+        # Normalize: strip protocol, path, trailing slash, whitespace
+        DOMAIN="$(printf '%s' "$RAW" | tr -d '[:space:]')"
+        DOMAIN="${DOMAIN#http://}"
+        DOMAIN="${DOMAIN#https://}"
+        DOMAIN="${DOMAIN%%/*}"
+        DOMAIN="${DOMAIN%/}"
+
+        if [ -z "$DOMAIN" ]; then
+          echo "Live / production domain is required" >&2
+          exit 1
+        fi
+
+        case "$DOMAIN" in
+          *[!A-Za-z0-9._-]*)
+            echo "Invalid domain: $DOMAIN" >&2
+            exit 1
+            ;;
+        esac
+
+        LIVE_URL="https://${DOMAIN}"
+        echo "Redirect target: ${LIVE_URL}\$request_uri"
+
+        # Locate the site config (Virtuozzo WordPress / NGINX PHP layouts vary)
+        CONF=""
+        for candidate in \
+          /etc/nginx/conf.d/sites-enabled/default.conf \
+          /etc/nginx/conf.d/sites_enabled/default.conf \
+          /etc/nginx/sites-enabled/default.conf \
+          /etc/nginx/conf.d/default.conf
+        do
+          if [ -f "$candidate" ]; then
+            CONF="$candidate"
+            break
+          fi
+        done
+
+        if [ -z "$CONF" ]; then
+          echo "Could not find Nginx default.conf under conf.d/sites-enabled (or sites_enabled)" >&2
+          exit 1
+        fi
+        echo "Using Nginx config: $CONF"
+
+        # Remove any prior addon blocks, then insert before the first location {}
+        TMP="$(mktemp)"
+        awk -v live="$LIVE_URL" '
+          BEGIN { skip=0; inserted=0 }
+          /# UPLOADS_REDIRECT_ADDON_BEGIN/ { skip=1; next }
+          /# UPLOADS_REDIRECT_ADDON_END/ { skip=0; next }
+          skip { next }
+          !inserted && /^[[:space:]]*location[[:space:]]/ {
+            print "    # UPLOADS_REDIRECT_ADDON_BEGIN"
+            print "    # Serve local uploads when present; otherwise 301 to production"
+            print "    location ^~ /wp-content/uploads/ {"
+            print "        try_files $uri $uri/ @missing_upload;"
+            print "    }"
+            print ""
+            print "    location @missing_upload {"
+            print "        return 301 " live "$request_uri;"
+            print "    }"
+            print "    # UPLOADS_REDIRECT_ADDON_END"
+            print ""
+            inserted=1
+          }
+          { print }
+          END {
+            if (!inserted) {
+              print "ERROR: no location block found in config; cannot insert uploads redirect" > "/dev/stderr"
+              exit 1
+            }
+          }
+        ' "$CONF" > "$TMP"
+        cat "$TMP" > "$CONF"
+        rm -f "$TMP"
+        echo "Injected uploads redirect into $CONF"
+
+        nginx -t
+        if command -v systemctl >/dev/null 2>&1; then
+          systemctl reload nginx || jem service restart
+        else
+          service nginx reload || jem service restart
+        fi
+        echo "Uploads redirect enabled → ${LIVE_URL}"
+      user: root
+
+  disableRedirect:
+    - cmd[${targetNodes.nodeGroup}]: |-
+        set -e
+
+        CONF=""
+        for candidate in \
+          /etc/nginx/conf.d/sites-enabled/default.conf \
+          /etc/nginx/conf.d/sites_enabled/default.conf \
+          /etc/nginx/sites-enabled/default.conf \
+          /etc/nginx/conf.d/default.conf
+        do
+          if [ -f "$candidate" ]; then
+            CONF="$candidate"
+            break
+          fi
+        done
+
+        if [ -n "$CONF" ]; then
+          TMP="$(mktemp)"
+          awk '
+            BEGIN { skip=0 }
+            /# UPLOADS_REDIRECT_ADDON_BEGIN/ { skip=1; next }
+            /# UPLOADS_REDIRECT_ADDON_END/ { skip=0; next }
+            skip { next }
+            { print }
+          ' "$CONF" > "$TMP"
+          cat "$TMP" > "$CONF"
+          rm -f "$TMP"
+          echo "Removed uploads redirect from $CONF"
+          nginx -t
+          if command -v systemctl >/dev/null 2>&1; then
+            systemctl reload nginx || jem service restart
+          else
+            service nginx reload || jem service restart
+          fi
+        else
+          echo "No Nginx default.conf found; skipping config cleanup"
+        fi
+
+        echo "Uploads redirect disabled"
+      user: root
+
+success: |
+  Uploads redirect is enabled.
+
+  Requests for `/wp-content/uploads/...` will be served from this server when the file exists locally.
+  Missing files are 301-redirected to the live domain you configured.
+
+  Use **Configure** to change the live domain, or **Disable** / Uninstall to remove the redirect.

@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Uploads Redirect">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1a6b4a"/>
+      <stop offset="100%" stop-color="#0d3d2c"/>
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" rx="24" fill="url(#bg)"/>
+  <!-- folder -->
+  <path fill="#e8f5ef" d="M28 44h28l8 8h36a8 8 0 0 1 8 8v36a8 8 0 0 1-8 8H28a8 8 0 0 1-8-8V52a8 8 0 0 1 8-8z"/>
+  <!-- redirect arrow -->
+  <path fill="#1a6b4a" d="M48 72h28v-8l16 14-16 14v-8H48z"/>
+</svg>
