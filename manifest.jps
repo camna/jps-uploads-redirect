@@ -1,8 +1,11 @@
 type: update
-version: 1.0.0
+jpsVersion: 1.7.2
+version: 1.0.1
 id: uploads-redirect
 name: Uploads Redirect
-logo: images/logo.svg
+logo: https://raw.githubusercontent.com/camna/jps-uploads-redirect/main/images/logo.svg
+homepage: https://github.com/camna/jps-uploads-redirect
+baseUrl: https://raw.githubusercontent.com/camna/jps-uploads-redirect/main
 
 description:
   short: Redirect missing /wp-content/uploads/ files to your live/production domain.
@@ -11,12 +14,12 @@ description:
 
     On install (or Configure), the add-on:
     1. Asks for your live (production) domain
-    2. Inserts Nginx `location` blocks for `/wp-content/uploads/` into `default.conf`
+    2. Inserts Nginx location blocks for /wp-content/uploads/ into default.conf
        (as the first location block, after root / index / headers / auth)
     3. Serves files that exist locally; otherwise 301-redirects to production
     4. Reloads Nginx
 
-    Use **Configure** to change the live domain. Use **Disable** (or Uninstall) to remove the redirect.
+    Use Configure to change the live domain. Use Disable (or Uninstall) to remove the redirect.
 
 categories:
   - apps/dev-and-admin-tools
@@ -63,12 +66,8 @@ actions:
         set -e
         RAW='${settings.liveDomain}'
 
-        # Normalize: strip protocol, path, trailing slash, whitespace
-        DOMAIN="$(printf '%s' "$RAW" | tr -d '[:space:]')"
-        DOMAIN="${DOMAIN#http://}"
-        DOMAIN="${DOMAIN#https://}"
-        DOMAIN="${DOMAIN%%/*}"
-        DOMAIN="${DOMAIN%/}"
+        # Normalize with sed only (no shell brace expansion; that clashes with JPS)
+        DOMAIN="$(printf '%s' "$RAW" | tr -d '[:space:]' | sed -e 's|^https://||I' -e 's|^http://||I' -e 's|/.*||' -e 's|/$||')"
 
         if [ -z "$DOMAIN" ]; then
           echo "Live / production domain is required" >&2
@@ -82,8 +81,8 @@ actions:
             ;;
         esac
 
-        LIVE_URL="https://${DOMAIN}"
-        echo "Redirect target: ${LIVE_URL}\$request_uri"
+        LIVE_URL="https://$DOMAIN"
+        echo "Redirect target: $LIVE_URL/\$request_uri"
 
         # Locate the site config (Virtuozzo WordPress / NGINX PHP layouts vary)
         CONF=""
@@ -144,7 +143,7 @@ actions:
         else
           service nginx reload || jem service restart
         fi
-        echo "Uploads redirect enabled → ${LIVE_URL}"
+        echo "Uploads redirect enabled to $LIVE_URL"
       user: root
 
   disableRedirect:
@@ -192,7 +191,7 @@ actions:
 success: |
   Uploads redirect is enabled.
 
-  Requests for `/wp-content/uploads/...` will be served from this server when the file exists locally.
+  Requests for /wp-content/uploads/... will be served from this server when the file exists locally.
   Missing files are 301-redirected to the live domain you configured.
 
-  Use **Configure** to change the live domain, or **Disable** / Uninstall to remove the redirect.
+  Use Configure to change the live domain, or Disable / Uninstall to remove the redirect.
